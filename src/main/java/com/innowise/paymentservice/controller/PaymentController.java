@@ -3,7 +3,6 @@ package com.innowise.paymentservice.controller;
 import com.innowise.paymentservice.dto.PaymentRequestDto;
 import com.innowise.paymentservice.entity.Payment;
 import com.innowise.paymentservice.service.PaymentService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
