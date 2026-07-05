@@ -1,8 +1,10 @@
 package com.innowise.paymentservice.controller;
 
 import com.innowise.paymentservice.dto.PaymentRequestDto;
-import com.innowise.paymentservice.entity.Payment;
+import com.innowise.paymentservice.dto.PaymentResponseDto;
+import com.innowise.paymentservice.mapper.PaymentMapper;
 import com.innowise.paymentservice.service.PaymentService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,41 +20,60 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/payments")
 public class PaymentController {
 
     private final PaymentService paymentService;
+    private final PaymentMapper paymentMapper;
 
-    public PaymentController(PaymentService paymentService) {
+    public PaymentController(PaymentService paymentService, PaymentMapper paymentMapper) {
         this.paymentService = paymentService;
+        this.paymentMapper = paymentMapper;
     }
 
     @PostMapping
-    public ResponseEntity<Payment> createPayment(@RequestBody PaymentRequestDto request, @AuthenticationPrincipal Jwt jwt) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(paymentService.createPayment(request, jwt.getClaim("sub")));
+    public ResponseEntity<PaymentResponseDto> createPayment(@Valid @RequestBody PaymentRequestDto request, @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(paymentService.createPayment(request, jwt.getClaim("sub")));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Payment> getPayment(@PathVariable String id, @AuthenticationPrincipal Jwt jwt) {
-        Payment payment = paymentService.findById(id);
+    public ResponseEntity<PaymentResponseDto> getPayment(@PathVariable String id, @AuthenticationPrincipal Jwt jwt) {
+        var payment = paymentService.findById(id);
         boolean isAdmin = jwt.getClaimAsStringList("authorities").contains("ROLE_ADMIN");
-        if (!isAdmin && !payment.getUserId().equals(jwt.getClaim("sub"))) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        return ResponseEntity.ok(payment);
+        if (!isAdmin && !payment.getUserId().equals(jwt.getClaim("sub"))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return ResponseEntity.ok(paymentMapper.toDto(payment));
     }
 
     @GetMapping
-    public ResponseEntity<List<Payment>> getAllPayments(@RequestParam(required = false) String orderId, @RequestParam(required = false) String status, @RequestParam(required = false) String userId, @AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<List<PaymentResponseDto>> getAllPayments(
+            @RequestParam(required = false) String orderId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String userId,
+            @AuthenticationPrincipal Jwt jwt) {
+
         boolean isAdmin = jwt.getClaimAsStringList("authorities").contains("ROLE_ADMIN");
         String effectiveUserId = (isAdmin && userId != null) ? userId : jwt.getClaim("sub");
-        return ResponseEntity.ok(paymentService.findPayments(orderId, status, effectiveUserId));
+
+        List<PaymentResponseDto> response = paymentService.findPayments(orderId, status, effectiveUserId)
+                .stream()
+                .map(paymentMapper::toDto)
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/users/{userId}/summary")
     public ResponseEntity<Double> getUserSummary(@PathVariable String userId, @RequestParam Instant start, @RequestParam Instant end, @AuthenticationPrincipal Jwt jwt) {
         boolean isAdmin = jwt.getClaimAsStringList("authorities").contains("ROLE_ADMIN");
-        if (!isAdmin && !userId.equals(jwt.getClaim("sub"))) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        if (!isAdmin && !userId.equals(jwt.getClaim("sub"))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         return ResponseEntity.ok(paymentService.getSummary(userId, start, end));
     }
 
