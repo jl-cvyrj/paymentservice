@@ -3,6 +3,7 @@ package com.innowise.paymentservice.service.impl;
 import com.innowise.paymentservice.client.RandomNumberClient;
 import com.innowise.paymentservice.dto.PaymentRequestDto;
 import com.innowise.paymentservice.dto.PaymentResponseDto;
+import com.innowise.paymentservice.dto.event.PaymentEventDto;
 import com.innowise.paymentservice.entity.Payment;
 import com.innowise.paymentservice.entity.PaymentStatus;
 import com.innowise.paymentservice.mapper.PaymentMapper;
@@ -12,6 +13,7 @@ import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -24,12 +26,14 @@ public class PaymentServiceImpl implements PaymentService {
     private final MongoTemplate mongoTemplate;
     private final PaymentMapper paymentMapper;
     private final RandomNumberClient randomClient;
+    private final KafkaTemplate<String, PaymentEventDto> kafkaTemplate;
 
-    public PaymentServiceImpl(PaymentRepository repository, MongoTemplate mongoTemplate, PaymentMapper paymentMapper, RandomNumberClient randomClient) {
+    public PaymentServiceImpl(PaymentRepository repository, MongoTemplate mongoTemplate, PaymentMapper paymentMapper, RandomNumberClient randomClient, KafkaTemplate<String, PaymentEventDto> kafkaTemplate) {
         this.paymentRepository = repository;
         this.mongoTemplate = mongoTemplate;
         this.paymentMapper = paymentMapper;
         this.randomClient = randomClient;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
     public PaymentResponseDto createPayment(PaymentRequestDto request, String userId) {
@@ -46,7 +50,12 @@ public class PaymentServiceImpl implements PaymentService {
             payment.setStatus(PaymentStatus.FAILED);
         }
 
-        return paymentMapper.toDto(paymentRepository.save(payment));
+        Payment savedPayment = paymentRepository.save(payment);
+
+        kafkaTemplate.send("payment-events", savedPayment.getOrderId(),
+                new PaymentEventDto(savedPayment.getOrderId(), savedPayment.getStatus().name()));
+
+        return paymentMapper.toDto(savedPayment);
     }
 
     public Payment findById(String id) {
