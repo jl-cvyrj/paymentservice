@@ -6,6 +6,7 @@ import com.innowise.paymentservice.dto.PaymentResponseDto;
 import com.innowise.paymentservice.dto.event.PaymentEventDto;
 import com.innowise.paymentservice.entity.Payment;
 import com.innowise.paymentservice.entity.PaymentStatus;
+import com.innowise.paymentservice.exception.ResourceNotFoundException;
 import com.innowise.paymentservice.mapper.PaymentMapper;
 import com.innowise.paymentservice.repository.PaymentRepository;
 import com.innowise.paymentservice.service.PaymentService;
@@ -13,8 +14,10 @@ import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.List;
@@ -36,40 +39,51 @@ public class PaymentServiceImpl implements PaymentService {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    public PaymentResponseDto createPayment(PaymentRequestDto request, String userId) {
+    public Mono<PaymentResponseDto> createPayment(PaymentRequestDto request, String userId) {
         Payment payment = paymentMapper.toEntity(request);
         payment.setUserId(userId);
         payment.setStatus(PaymentStatus.PENDING);
         payment.setTimestamp(Instant.now());
-        paymentRepository.save(payment);
 
-        try {
-            Integer number = randomClient.getRandomNumber();
-            payment.setStatus(number % 2 == 0 ? PaymentStatus.SUCCESS : PaymentStatus.FAILED);
-        } catch (Exception e) {
-            payment.setStatus(PaymentStatus.FAILED);
-        }
-
-        Payment savedPayment = paymentRepository.save(payment);
-
-        kafkaTemplate.send("payment-events", savedPayment.getOrderId(),
-                new PaymentEventDto(savedPayment.getOrderId(), savedPayment.getStatus().name()));
-
-        return paymentMapper.toDto(savedPayment);
+        return paymentRepository.save(payment)
+                .flatMap(savedPayment ->
+                        randomClient.getRandomNumber()
+                                .map(number -> {
+                                    savedPayment.setStatus(number % 2 == 0 ? PaymentStatus.SUCCESS : PaymentStatus.FAILED);
+                                    return savedPayment;
+                                })
+                                .onErrorResume(e -> {
+                                    savedPayment.setStatus(PaymentStatus.FAILED);
+                                    return Mono.just(savedPayment);
+                                })
+                )
+                .flatMap(paymentRepository::save)
+                .flatMap(updatedPayment ->
+                        Mono.fromFuture(
+                                kafkaTemplate.send("payment-events", updatedPayment.getOrderId(),
+                                        new PaymentEventDto(updatedPayment.getOrderId(), updatedPayment.getStatus().name()))
+                                )
+                                .thenReturn(paymentMapper.toDto(updatedPayment))
+                );
     }
 
-    public Payment findById(String id) {
-        return paymentRepository.findById(id).orElseThrow(() -> new RuntimeException("Payment not found"));
+    public Mono<Payment> findById(String id) {
+        return paymentRepository.findById(id)
+                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Payment not found")));
     }
 
     public List<Payment> findPayments(String orderId, String status, String userId) {
+        Criteria criteria = Criteria.where("userId").is(userId);
+
         if (orderId != null) {
-            return paymentRepository.findAllByUserIdAndOrderId(userId, orderId);
+            criteria.and("orderId").is(orderId);
         }
         if (status != null) {
-            return paymentRepository.findAllByUserIdAndStatus(userId, PaymentStatus.valueOf(status));
+            criteria.and("status").is(PaymentStatus.valueOf(status));
         }
-        return paymentRepository.findAllByUserId(userId);
+
+        Query query = new Query(criteria);
+        return mongoTemplate.find(query, Payment.class);
     }
 
     public Double getSummary(String userId, Instant start, Instant end) {

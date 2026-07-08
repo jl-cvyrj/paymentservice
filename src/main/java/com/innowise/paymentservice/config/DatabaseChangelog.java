@@ -17,8 +17,8 @@ public class DatabaseChangelog {
 
     @ChangeSet(order = "002", id = "create-indexes", author = "karalina")
     public void createIndexes(MongoTemplate template) {
-        template.indexOps("payments").ensureIndex(new Index().on("userId", Sort.Direction.ASC));
-        template.indexOps("payments").ensureIndex(new Index().on("orderId", Sort.Direction.ASC));
+        template.indexOps("payments").ensureIndex(new Index().on("user_id", Sort.Direction.ASC));
+        template.indexOps("payments").ensureIndex(new Index().on("order_id", Sort.Direction.ASC));
         template.indexOps("payments").ensureIndex(new Index().on("status", Sort.Direction.ASC));
     }
 }

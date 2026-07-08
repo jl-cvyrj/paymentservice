@@ -2,23 +2,24 @@ package com.innowise.paymentservice.service.impl;
 
 import com.innowise.paymentservice.client.RandomNumberClient;
 import com.innowise.paymentservice.dto.PaymentRequestDto;
+import com.innowise.paymentservice.dto.PaymentResponseDto;
 import com.innowise.paymentservice.dto.event.PaymentEventDto;
 import com.innowise.paymentservice.entity.Payment;
+import com.innowise.paymentservice.entity.PaymentStatus;
 import com.innowise.paymentservice.mapper.PaymentMapper;
 import com.innowise.paymentservice.repository.PaymentRepository;
+import reactor.test.StepVerifier;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
+import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
+import java.util.concurrent.CompletableFuture;
 
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.anyString;
 
 class PaymentServiceUnitTest {
@@ -31,11 +32,11 @@ class PaymentServiceUnitTest {
     private final PaymentServiceImpl paymentService;
 
     public PaymentServiceUnitTest() {
-        this.paymentRepository = Mockito.mock(PaymentRepository.class);
-        this.mongoTemplate = Mockito.mock(MongoTemplate.class);
-        this.paymentMapper = Mockito.mock(PaymentMapper.class);
-        this.randomClient = Mockito.mock(RandomNumberClient.class);
-        this.kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        this.paymentRepository = mock(PaymentRepository.class);
+        this.mongoTemplate = mock(MongoTemplate.class);
+        this.paymentMapper = mock(PaymentMapper.class);
+        this.randomClient = mock(RandomNumberClient.class);
+        this.kafkaTemplate = mock(KafkaTemplate.class);
 
         this.paymentService = new PaymentServiceImpl(
                 paymentRepository,
@@ -50,27 +51,45 @@ class PaymentServiceUnitTest {
     void createPayment_Success() {
         PaymentRequestDto request = new PaymentRequestDto("ord1", BigDecimal.valueOf(100.0));
         Payment payment = new Payment();
+        payment.setOrderId("ord1");
 
         when(paymentMapper.toEntity(request)).thenReturn(payment);
-        when(randomClient.getRandomNumber()).thenReturn(2);
-        when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+        when(paymentMapper.toDto(any())).thenReturn(
+                PaymentResponseDto.builder()
+                        .orderId("ord1")
+                        .status(PaymentStatus.SUCCESS)
+                        .build()
+        );
+        when(paymentRepository.save(any(Payment.class))).thenReturn(Mono.just(payment));
+        when(randomClient.getRandomNumber()).thenReturn(Mono.just(2));
+        when(kafkaTemplate.send(anyString(), anyString(), any()))
+                .thenReturn(CompletableFuture.completedFuture(mock(org.springframework.kafka.support.SendResult.class)));
 
-        paymentService.createPayment(request, "user");
-
-        verify(paymentRepository, times(2)).save(payment);
-        verify(kafkaTemplate).send(anyString(), isNull(), any(PaymentEventDto.class));
+        StepVerifier.create(paymentService.createPayment(request, "user"))
+                .expectNextMatches(dto -> dto.status() == PaymentStatus.SUCCESS)
+                .verifyComplete();
     }
 
     @Test
     void createPayment_Failure() {
         PaymentRequestDto request = new PaymentRequestDto("ord1", BigDecimal.valueOf(100.0));
-        when(randomClient.getRandomNumber()).thenThrow(new RuntimeException("API Down"));
+        Payment payment = new Payment();
+        payment.setOrderId("ord1");
 
-        try {
-            paymentService.createPayment(request, "user");
-        } catch (Exception e) {
-        }
+        when(paymentMapper.toEntity(request)).thenReturn(payment);
+        when(paymentMapper.toDto(any())).thenReturn(
+                PaymentResponseDto.builder()
+                        .orderId("ord1")
+                        .status(PaymentStatus.FAILED)
+                        .build()
+        );
+        when(paymentRepository.save(any(Payment.class))).thenReturn(Mono.just(payment));
+        when(randomClient.getRandomNumber()).thenReturn(Mono.error(new RuntimeException("API Down")));
+        when(kafkaTemplate.send(anyString(), anyString(), any()))
+                .thenReturn(CompletableFuture.completedFuture(mock(org.springframework.kafka.support.SendResult.class)));
 
-        verify(paymentRepository, never()).save(any());
+        StepVerifier.create(paymentService.createPayment(request, "user"))
+                .expectNextMatches(dto -> dto.status() == PaymentStatus.FAILED)
+                .verifyComplete();
     }
 }

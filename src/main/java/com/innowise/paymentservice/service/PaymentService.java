@@ -3,17 +3,17 @@ package com.innowise.paymentservice.service;
 import com.innowise.paymentservice.dto.PaymentRequestDto;
 import com.innowise.paymentservice.dto.PaymentResponseDto;
 import com.innowise.paymentservice.entity.Payment;
-import org.springframework.stereotype.Service;
+import com.innowise.paymentservice.exception.ResourceNotFoundException;
+import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.List;
 
-@Service
 public interface PaymentService {
 
-    PaymentResponseDto createPayment(PaymentRequestDto request, String userId);
+    Mono<PaymentResponseDto> createPayment(PaymentRequestDto request, String userId);
 
-    Payment findById(String id);
+    Mono<Payment> findById(String id) throws ResourceNotFoundException;
 
     List<Payment> findPayments(String orderId, String status, String userId);
 

@@ -17,7 +17,10 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
@@ -36,12 +39,9 @@ class PaymentIntegrationTest {
 
     @DynamicPropertySource
     static void setProperties(DynamicPropertyRegistry registry) {
-        mongoDB.start();
-        kafka.start();
 
         registry.add("spring.data.mongodb.uri", mongoDB::getReplicaSetUrl);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("random.api.url", () -> "http://localhost:" + System.getProperty("wiremock.server.port"));
     }
 
     @Test

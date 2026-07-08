@@ -2,9 +2,11 @@ package com.innowise.paymentservice.controller;
 
 import com.innowise.paymentservice.dto.PaymentRequestDto;
 import com.innowise.paymentservice.dto.PaymentResponseDto;
+import com.innowise.paymentservice.entity.PaymentStatus;
 import com.innowise.paymentservice.mapper.PaymentMapper;
 import com.innowise.paymentservice.service.PaymentService;
 import jakarta.validation.Valid;
+import org.mapstruct.Builder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,7 +19,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -35,19 +39,24 @@ public class PaymentController {
     }
 
     @PostMapping
-    public ResponseEntity<PaymentResponseDto> createPayment(@Valid @RequestBody PaymentRequestDto request, @AuthenticationPrincipal Jwt jwt) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(paymentService.createPayment(request, jwt.getClaim("sub")));
+    public Mono<ResponseEntity<PaymentResponseDto>> createPayment(@Valid @RequestBody PaymentRequestDto request, @AuthenticationPrincipal Jwt jwt) {
+        return paymentService.createPayment(request, jwt.getClaim("sub"))
+                .map(dto -> {
+                    return ResponseEntity.status(HttpStatus.ACCEPTED).body(dto);
+                });
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<PaymentResponseDto> getPayment(@PathVariable String id, @AuthenticationPrincipal Jwt jwt) {
-        var payment = paymentService.findById(id);
-        boolean isAdmin = jwt.getClaimAsStringList("authorities").contains("ROLE_ADMIN");
-        if (!isAdmin && !payment.getUserId().equals(jwt.getClaim("sub"))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-        return ResponseEntity.ok(paymentMapper.toDto(payment));
+    public Mono<ResponseEntity<PaymentResponseDto>> getPayment(@PathVariable String id, @AuthenticationPrincipal Jwt jwt) {
+        return paymentService.findById(id)
+                .map(payment -> {
+                    boolean isAdmin = jwt.getClaimAsStringList("authorities").contains("ROLE_ADMIN");
+                    if (!isAdmin && !payment.getUserId().equals(jwt.getClaim("sub"))) {
+                        return ResponseEntity.status(HttpStatus.FORBIDDEN).<PaymentResponseDto>build();
+                    }
+                    return ResponseEntity.ok(paymentMapper.toDto(payment));
+                })
+                .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
     @GetMapping
